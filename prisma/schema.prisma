@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelo de Usuario
+model User {
+  id              String    @id @default(cuid())
+  googleId        String?   @unique
+  email           String    @unique
+  name            String
+  profilePicture  String?
+  
+  // Preferencias del usuario (JSON)
+  preferences     Json      @default("{\"transportModes\":{\"bus\":true,\"metro\":true,\"walking\":true},\"notifications\":{\"weather\":true,\"routes\":true}}")
+  
+  // Estadísticas
+  totalTrips      Int       @default(0)
+  lastActive      DateTime  @default(now())
+  
+  // Relaciones
+  frequentRoutes  FrequentRoute[]
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@map("users")
+}
+
+// Modelo de Rutas Frecuentes
+model FrequentRoute {
+  id                String    @id @default(cuid())
+  userId            String
+  routeName         String
+  
+  // Origen
+  originName        String
+  originAddress     String
+  originLatitude    Float
+  originLongitude   Float
+  
+  // Destino
+  destinationName        String
+  destinationAddress     String
+  destinationLatitude    Float
+  destinationLongitude   Float
+  
+  // Estadísticas de uso
+  timesUsed         Int       @default(1)
+  lastUsed          DateTime  @default(now())
+  
+  // Información de la ruta (JSON)
+  routeInfo         Json?
+  
+  // Estado
+  isActive          Boolean   @default(true)
+  
+  // Relación con usuario
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  @@map("frequent_routes")
+  @@index([userId])
+  @@index([userId, timesUsed])
+}
