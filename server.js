@@ -117,6 +117,24 @@ process.on('beforeExit', async () => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+async function setupDatabase() {
+  try {
+    await prisma.$executeRaw`SELECT 1`; // Test connection
+    console.log('📊 Configurando base de datos...');
+    
+    // Usar Prisma push para crear/actualizar tablas
+    const { execSync } = require('child_process');
+    execSync('npx prisma db push --skip-generate', { stdio: 'inherit' });
+    
+    console.log('✅ Tablas sincronizadas');
+  } catch (error) {
+    console.log('⚠️ Base de datos:', error.message);
+  }
+}
+
+setupDatabase();
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
   console.log(`📦 PostgreSQL con Prisma ORM`);
