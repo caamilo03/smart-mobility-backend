@@ -1,42 +1,228 @@
 const express = require('express');
-const passport = require('passport');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 const router = express.Router();
 
-// Middleware para verificar si el usuario está autenticado
+// Configuración JWT
+const JWT_SECRET = process.env.JWT_SECRET || 'smart-mobility-secret-key';
+const JWT_EXPIRY = '7d'; // Token válido por 7 días
+
+// Middleware para verificar JWT
 const isAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated()) {
-    return next();
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({
+        success: false,
+        message: 'No autenticado'
+      });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    // Adjuntar información de usuario al request
+    req.user = decoded;
+    next();
+  } catch (error) {
+    console.error('Error de autenticación JWT:', error);
+    res.status(401).json({
+      success: false,
+      message: 'Token inválido o expirado'
+    });
   }
-  res.status(401).json({
-    success: false,
-    message: 'No autenticado'
-  });
 };
 
-// Iniciar autenticación con Google
-router.get('/google',
-  passport.authenticate('google', {
-    scope: ['profile', 'email']
-  })
-);
+// Función para generar token JWT
+const generateToken = (user) => {
+  return jwt.sign(
+    {
+      id: user.id,
+      email: user.email,
+      name: user.name
+    },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRY }
+  );
+};
 
-// Callback de Google OAuth
-router.get('/google/callback',
-  passport.authenticate('google', { 
-    failureRedirect: '/api/auth/error' 
-  }),
-  (req, res) => {
-    // Autenticación exitosa
-    console.log('✅ Login exitoso para:', req.user.name);
-    
-    // Redirigir a la app con éxito
-    // En desarrollo, puedes cambiar esto por una página de éxito
-    res.redirect(`${process.env.FRONTEND_URL}/auth/success`);
+// Registro de nuevos usuarios
+router.post('/register', async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    // Validación básica
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nombre, email y contraseña son requeridos'
+      });
+    }
+
+    // Verificar si el usuario ya existe
+    const existingUser = await req.prisma.user.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Este correo ya está registrado'
+      });
+    }
+
+    // Encriptar contraseña
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Crear usuario
+    const newUser = await req.prisma.user.create({
+      data: {
+        name,
+        email: email.toLowerCase(),
+        password: hashedPassword,
+        provider: 'local'
+      }
+    });
+
+    // Generar token
+    const token = generateToken(newUser);
+
+    // Respuesta exitosa
+    res.status(201).json({
+      success: true,
+      message: 'Usuario registrado exitosamente',
+      token,
+      user: {
+        id: newUser.id,
+        name: newUser.name,
+        email: newUser.email
+      }
+    });
+  } catch (error) {
+    console.error('Error en registro:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error creando usuario',
+      error: error.message
+    });
   }
-);
+});
 
-// Obtener usuario actual
+// Login con email y contraseña
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Validación básica
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email y contraseña son requeridos'
+      });
+    }
+
+    // Buscar usuario
+    const user = await req.prisma.user.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    // Verificar si existe
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciales inválidas'
+      });
+    }
+
+    // Si el usuario no tiene contraseña (porque se registró con OAuth)
+    if (!user.password) {
+      return res.status(401).json({
+        success: false,
+        message: 'Este usuario no tiene contraseña configurada'
+      });
+    }
+
+    // Verificar contraseña
+    const passwordMatch = await bcrypt.compare(password, user.password);
+
+    if (!passwordMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciales inválidas'
+      });
+    }
+
+    // Actualizar último acceso
+    await req.prisma.user.update({
+      where: { id: user.id },
+      data: { lastActive: new Date() }
+    });
+
+    // Generar token
+    const token = generateToken(user);
+
+    // Respuesta exitosa
+    res.json({
+      success: true,
+      message: 'Login exitoso',
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }
+    });
+  } catch (error) {
+    console.error('Error en login:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error en login',
+      error: error.message
+    });
+  }
+});
+
+// Verificar token (útil para validar sesión en cliente)
+router.get('/verify', isAuthenticated, async (req, res) => {
+  try {
+    // Buscar usuario actual (por si fue eliminado mientras el token era válido)
+    const user = await req.prisma.user.findUnique({
+      where: { id: req.user.id }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
+
+    // Actualizar último acceso
+    await req.prisma.user.update({
+      where: { id: user.id },
+      data: { lastActive: new Date() }
+    });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      }
+    });
+  } catch (error) {
+    console.error('Error en verificación:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error verificando token',
+      error: error.message
+    });
+  }
+});
+
+// Obtener perfil de usuario actual
 router.get('/me', isAuthenticated, async (req, res) => {
   try {
     const user = await req.prisma.user.findUnique({
@@ -49,6 +235,13 @@ router.get('/me', isAuthenticated, async (req, res) => {
         }
       }
     });
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuario no encontrado'
+      });
+    }
     
     res.json({
       success: true,
@@ -63,54 +256,8 @@ router.get('/me', isAuthenticated, async (req, res) => {
   }
 });
 
-// Verificar si está autenticado
-router.get('/check', (req, res) => {
-  if (req.isAuthenticated()) {
-    res.json({
-      success: true,
-      authenticated: true,
-      user: {
-        id: req.user.id,
-        name: req.user.name,
-        email: req.user.email
-      }
-    });
-  } else {
-    res.json({
-      success: true,
-      authenticated: false,
-      user: null
-    });
-  }
-});
-
-// Logout
-router.post('/logout', (req, res) => {
-  req.logout((err) => {
-    if (err) {
-      return res.status(500).json({
-        success: false,
-        message: 'Error cerrando sesión'
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: 'Sesión cerrada exitosamente'
-    });
-  });
-});
-
-// Ruta de error
-router.get('/error', (req, res) => {
-  res.status(401).json({
-    success: false,
-    message: 'Error en la autenticación con Google'
-  });
-});
-
-// Endpoint de prueba (solo desarrollo)
-router.post('/test-login', async (req, res) => {
+// Endpoint para crear usuario de prueba (solo desarrollo)
+router.post('/test-account', async (req, res) => {
   if (process.env.NODE_ENV !== 'development') {
     return res.status(403).json({ 
       success: false,
@@ -119,42 +266,56 @@ router.post('/test-login', async (req, res) => {
   }
 
   try {
-    // Crear o encontrar usuario de prueba
+    // Datos de prueba
+    const testEmail = 'test@smartmobility.com';
+    const testPassword = 'password123';
+    
+    // Buscar o crear usuario de prueba
     let user = await req.prisma.user.findUnique({
-      where: { email: 'test@smartmobility.com' }
+      where: { email: testEmail }
     });
 
     if (!user) {
+      // Generar hash de contraseña
+      const hashedPassword = await bcrypt.hash(testPassword, 10);
+      
+      // Crear nuevo usuario
       user = await req.prisma.user.create({
         data: {
           name: 'Usuario de Prueba',
-          email: 'test@smartmobility.com'
+          email: testEmail,
+          password: hashedPassword,
+          provider: 'local'
         }
       });
     }
 
-    // Simular login
-    req.login(user, (err) => {
-      if (err) {
-        return res.status(500).json({
-          success: false,
-          message: 'Error en login de prueba'
-        });
-      }
+    // Generar token
+    const token = generateToken(user);
 
-      res.json({
-        success: true,
-        message: 'Login de prueba exitoso',
-        user
-      });
+    res.json({
+      success: true,
+      message: 'Cuenta de prueba creada/actualizada',
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email
+      },
+      credentials: {
+        email: testEmail,
+        password: testPassword
+      }
     });
   } catch (error) {
+    console.error('Error creando cuenta de prueba:', error);
     res.status(500).json({
       success: false,
-      message: 'Error en login de prueba',
+      message: 'Error creando cuenta de prueba',
       error: error.message
     });
   }
 });
 
-module.exports = router;
+// Exportar router y middleware de autenticación
+module.exports = { router, isAuthenticated };

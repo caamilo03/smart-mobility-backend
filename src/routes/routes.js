@@ -1,17 +1,7 @@
 const express = require('express');
+const { isAuthenticated } = require('./auth');
 
 const router = express.Router();
-
-// Middleware para verificar autenticación
-const isAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated()) {
-    return next();
-  }
-  res.status(401).json({
-    success: false,
-    message: 'No autenticado'
-  });
-};
 
 // Obtener rutas frecuentes del usuario
 router.get('/frequent', isAuthenticated, async (req, res) => {

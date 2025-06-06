@@ -15,17 +15,37 @@ const prisma = new PrismaClient();
 require('./src/config/passport');
 
 // Importar rutas
-const authRoutes = require('./src/routes/auth');
+const { router: authRoutes, isAuthenticated } = require('./src/routes/auth');
 const userRoutes = require('./src/routes/users');
 const routesRoutes = require('./src/routes/routes');
 
 const app = express();
 
 // Middleware de seguridad
-app.use(helmet());
+app.use(helmet({
+  // Deshabilitar políticas restrictivas para desarrollo
+  crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
+
+// Configuración CORS para permitir cualquier origen, incluyendo emuladores
 app.use(cors({
-  origin: ['http://localhost:8081', 'exp://192.168.1.100:8081', 'http://localhost:3000'],
-  credentials: true
+  // Permitir estos orígenes específicos
+  origin: [
+    'http://localhost:3000', 
+    'http://localhost:8081',
+    'http://10.0.2.2:8081',    // Emulador Android (Expo)
+    'http://10.0.2.2:3000',    // Emulador Android accediendo al puerto 3000
+    'http://10.0.2.2:19000',   // Expo DevServer en Android
+    'http://10.0.2.2:19006',   // Expo Web en Android
+    'exp://10.0.2.2:8081',     // Protocolo Expo
+    'exp://10.0.2.2:19000',    // Protocolo Expo
+    'exp://192.168.101.12:8081' // Tu IP local con Expo
+  ],
+  // Estas opciones son importantes para aplicaciones móviles
+  credentials: true,
+  exposedHeaders: ['Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
 }));
 
 // Configurar sesiones (en lugar de JWT)

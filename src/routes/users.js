@@ -1,17 +1,7 @@
 const express = require('express');
+const { isAuthenticated } = require('./auth');
 
 const router = express.Router();
-
-// Middleware para verificar autenticación
-const isAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated()) {
-    return next();
-  }
-  res.status(401).json({
-    success: false,
-    message: 'No autenticado'
-  });
-};
 
 // Obtener perfil del usuario
 router.get('/profile', isAuthenticated, async (req, res) => {
@@ -140,4 +130,39 @@ router.get('/stats', isAuthenticated, async (req, res) => {
   }
 });
 
+// Cambia esta exportación ES module:
+// export const register = async (name, email, password) => {
+
+// Por esta exportación CommonJS:
+const register = async (name, email, password) => {
+  console.log('Intentando registrar con:', { name, email });
+  try {
+    console.log('URL del API:', `${API_URL}/auth/register`);
+    
+    const response = await fetch(`${API_URL}/auth/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ name, email, password }),
+    });
+    
+    console.log('Respuesta recibida, status:', response.status);
+    const data = await response.json();
+    console.log('Datos de respuesta:', data);
+    
+    // Resto del código...
+  } catch (error) {
+    console.error('Error en registro (detallado):', error);
+    console.error('Tipo de error:', typeof error);
+    console.error('Mensaje:', error.message);
+    console.error('Stack:', error.stack);
+    
+    return { success: false, error: 'Error de conexión' };
+  }
+};
+
+// Exporta también la función register
 module.exports = router;
+module.exports.register = register;
